@@ -44,6 +44,8 @@ enum {
   PUSH_APP_TASK_ID,
   PUSH_INIT_VTX_TASK_ID,
   CHECK_TASK_ID,
+  START_TIMER_TASK_ID,
+  STOP_TIMER_TASK_ID,
 };
 
 enum FieldIDs {
@@ -154,6 +156,15 @@ void pull_scan_task_impl(const Task *task,
 void pull_app_task_impl(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
                         Context ctx, Runtime *runtime);
+
+void start_timer_task_impl(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx, Runtime *runtime);
+void stop_timer_task_impl(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx, Runtime *runtime);
+
+
 
 GraphPiece pull_init_task_impl(const Task *task,
                                const std::vector<PhysicalRegion> &regions,

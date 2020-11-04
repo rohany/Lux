@@ -15,10 +15,20 @@
 
 #include "lux_mapper.h"
 #include "graph.h"
+#include "../../beam_mapper.h"
 
-LuxMapper::LuxMapper(Machine m, Runtime *rt, Processor p)
-  : DefaultMapper(rt->get_mapper_runtime(), m, p)
+
+LuxMapper::LuxMapper(Machine machine, MapperRuntime *rt, Processor local,
+                             const char *mapper_name)
+  : BeamMapper(rt, machine, local, mapper_name)
 {
+  // add_task_to_care("load_task (pull)");
+  // add_task_to_care("scan_task (pull)");
+  // add_task_to_care("init_task (pull)");
+  add_task_to_care("app_task (pull)");
+  name_application("pagerank-beam");
+
+  // Some initialization that the Lux Mapper needs.
   numNodes = remote_gpus.size();
   //numGPUs = local_gpus.size() * numNodes;
   //numCPUs = local_cpus.size() * numNodes;
@@ -71,38 +81,90 @@ LuxMapper::LuxMapper(Machine m, Runtime *rt, Processor p)
   }
 }
 
-LuxMapper::~LuxMapper()
-{
-  std::map<unsigned, std::vector<Processor>* >::iterator it;
-  for (it = allGPUs.begin(); it != allGPUs.end(); it++)
-    delete it->second;
-  for (it = allCPUs.begin(); it != allCPUs.end(); it++)
-    delete it->second;
-}
-
-void LuxMapper::select_task_options(const MapperContext ctx,
-                                         const Task& task,
-                                         TaskOptions& output)
-{
-  //if (task.task_id == PUSH_INIT_VTX_TASK_ID) {
-  //  output.inline_task = false;
-  //  output.stealable = false;
-  //  output.map_locally = true;
-  //  output.initial_proc = allCPUs[0]->at(0);
-  //} else {
-    DefaultMapper::select_task_options(ctx, task, output);
-  //}
-}
-
+// LuxMapper::LuxMapper(Machine m, Runtime *rt, Processor p)
+//   : DefaultMapper(rt->get_mapper_runtime(), m, p)
+// {
+//   numNodes = remote_gpus.size();
+//   //numGPUs = local_gpus.size() * numNodes;
+//   //numCPUs = local_cpus.size() * numNodes;
+//   Machine::ProcessorQuery proc_query(machine);
+//   for (Machine::ProcessorQuery::iterator it = proc_query.begin();
+//        it != proc_query.end(); it++)
+//   {
+//     AddressSpace node = it->address_space();
+//     std::map<unsigned, std::vector<Processor>* >::const_iterator finder =
+//       allGPUs.find(node);
+//     if (finder == allGPUs.end())
+//       allGPUs[node] = new std::vector<Processor>;
+//     finder = allCPUs.find(node);
+//     if (finder == allCPUs.end())
+//       allCPUs[node] = new std::vector<Processor>;
+//     switch (it->kind())
+//     {
+//       case Processor::TOC_PROC:
+//       {
+//         allGPUs[node]->push_back(*it);
+//         Machine::MemoryQuery fb_query(machine);
+//         fb_query.only_kind(Memory::GPU_FB_MEM);
+//         fb_query.best_affinity_to(*it);
+//         // Assume each GPU has one device memory
+//         assert(fb_query.count() == 1);
+//         memFBs[*it] = *(fb_query.begin());
+//         Machine::MemoryQuery zc_query(machine);
+//         zc_query.only_kind(Memory::Z_COPY_MEM);
+//         zc_query.has_affinity_to(*it);
+//         assert(zc_query.count() == 1);
+//         memZCs[*it] = *(zc_query.begin());
+//         break;
+//       }
+//       case Processor::LOC_PROC:
+//       {
+//         allCPUs[node]->push_back(*it);
+//         //Machine::MemoryQuery sys_query(machine);
+//         //sys_query.only_kind(Memory::SYSTEM_MEM);
+//         //sys_query.has_affinity_to(*it);
+//         //memSys[*it] = *(sys_query.begin());
+//         Machine::MemoryQuery zc_query(machine);
+//         zc_query.only_kind(Memory::Z_COPY_MEM);
+//         zc_query.has_affinity_to(*it);
+//         memZCs[*it] = *(zc_query.begin());
+//         break;
+//       }
+//       default:
+//         break;
+//     }
+//   }
+// }
+// 
+// LuxMapper::~LuxMapper()
+// {
+//   std::map<unsigned, std::vector<Processor>* >::iterator it;
+//   for (it = allGPUs.begin(); it != allGPUs.end(); it++)
+//     delete it->second;
+//   for (it = allCPUs.begin(); it != allCPUs.end(); it++)
+//     delete it->second;
+// }
+// 
+// void LuxMapper::select_task_options(const MapperContext ctx,
+//                                          const Task& task,
+//                                          TaskOptions& output)
+// {
+//   //if (task.task_id == PUSH_INIT_VTX_TASK_ID) {
+//   //  output.inline_task = false;
+//   //  output.stealable = false;
+//   //  output.map_locally = true;
+//   //  output.initial_proc = allCPUs[0]->at(0);
+//   //} else {
+//     DefaultMapper::select_task_options(ctx, task, output);
+//   //}
+// }
+// 
 void LuxMapper::slice_task(const MapperContext ctx,
                                 const Task& task,
                                 const SliceTaskInput& input,
                                 SliceTaskOutput& output)
 {
-  if (task.task_id == PULL_APP_TASK_ID || task.task_id == PULL_INIT_TASK_ID
-    ||task.task_id == PUSH_APP_TASK_ID || task.task_id == PUSH_INIT_TASK_ID
-    ||task.task_id == CHECK_TASK_ID)
-  {
+  if (task.task_id == PULL_INIT_TASK_ID) {
     if (gpuSlices.size() > 0) {
       output.slices = gpuSlices;
       return;
@@ -120,27 +182,51 @@ void LuxMapper::slice_task(const MapperContext ctx,
       gpuSlices.push_back(slice);
     }
     output.slices = gpuSlices;
-  } else if (task.task_id == PULL_LOAD_TASK_ID || task.task_id == PUSH_LOAD_TASK_ID) {
-    if (cpuSlices.size() > 0) {
-      output.slices = cpuSlices;
-      return;
-    }
-    Rect<1> input_rect = input.domain;
-    unsigned cnt = 0;
-    for (PointInRectIterator<1> it(input_rect); it(); it++) {
-      TaskSlice slice;
-      Rect<1> task_rect(*it, *it);
-      slice.domain = task_rect;
-      slice.proc = allCPUs[cnt % numNodes]->at(((cnt/numNodes)*9)%local_cpus.size());
-      cnt ++;
-      slice.recurse = false;
-      slice.stealable = false;
-      cpuSlices.push_back(slice);
-    }
-    output.slices = cpuSlices;
   } else {
-    DefaultMapper::slice_task(ctx, task, input, output);
+    BeamMapper::slice_task(ctx, task, input, output);
   }
+//   if (task.task_id == PULL_APP_TASK_ID || task.task_id == PULL_INIT_TASK_ID
+//     ||task.task_id == PUSH_APP_TASK_ID || task.task_id == PUSH_INIT_TASK_ID
+//     ||task.task_id == CHECK_TASK_ID)
+//   {
+//     if (gpuSlices.size() > 0) {
+//       output.slices = gpuSlices;
+//       return;
+//     }
+//     Rect<1> input_rect = input.domain;
+//     unsigned cnt = 0;
+//     for (PointInRectIterator<1> it(input_rect); it(); it++) {
+//       TaskSlice slice;
+//       Rect<1> task_rect(*it, *it);
+//       slice.domain = task_rect;
+//       slice.proc = allGPUs[cnt % numNodes]->at(((cnt/numNodes)*9) % local_gpus.size());
+//       cnt ++;
+//       slice.recurse = false;
+//       slice.stealable = false;
+//       gpuSlices.push_back(slice);
+//     }
+//     output.slices = gpuSlices;
+//   } else if (task.task_id == PULL_LOAD_TASK_ID || task.task_id == PUSH_LOAD_TASK_ID) {
+//     if (cpuSlices.size() > 0) {
+//       output.slices = cpuSlices;
+//       return;
+//     }
+//     Rect<1> input_rect = input.domain;
+//     unsigned cnt = 0;
+//     for (PointInRectIterator<1> it(input_rect); it(); it++) {
+//       TaskSlice slice;
+//       Rect<1> task_rect(*it, *it);
+//       slice.domain = task_rect;
+//       slice.proc = allCPUs[cnt % numNodes]->at(((cnt/numNodes)*9)%local_cpus.size());
+//       cnt ++;
+//       slice.recurse = false;
+//       slice.stealable = false;
+//       cpuSlices.push_back(slice);
+//     }
+//     output.slices = cpuSlices;
+//   } else {
+//     DefaultMapper::slice_task(ctx, task, input, output);
+//   }
 }
 
 Memory LuxMapper::default_policy_select_target_memory(MapperContext ctx,

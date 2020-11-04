@@ -25,6 +25,13 @@
 
 LegionRuntime::Logger::Category log_pr("pagerank");
 
+void start_timer_task_impl(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx, Runtime *runtime) {}
+void stop_timer_task_impl(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx, Runtime *runtime) {}
+
 void parse_input_args(char **argv, int argc, int &num_gpu,
                       int &num_iter, std::string &file_name,
                       bool &verbose);
@@ -94,28 +101,57 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
   Future f = runtime->execute_task(ctx, scan_task);
   f.get_void_result();
 
-  PullInitTask init_task(graph, task_is, local_args);
-  fm = runtime->execute_index_space(ctx, init_task);
-  fm.wait_all_results();
-  for (PointInRectIterator<1> it(task_rect); it(); it++) {
-    GraphPiece piece = fm.get_result<GraphPiece>(*it);
-    local_args.set_point(*it, TaskArgument(&piece, sizeof(GraphPiece)));
-  }
+  for (int epoch = 0; epoch < 10000; epoch++) {
+    printf("BEFORE INIT TASK\n");
+    PullInitTask init_task(graph, task_is, local_args);
+    fm = runtime->execute_index_space(ctx, init_task);
+    fm.wait_all_results();
+    for (PointInRectIterator<1> it(task_rect); it(); it++) {
+      GraphPiece piece = fm.get_result<GraphPiece>(*it);
+      local_args.set_point(*it, TaskArgument(&piece, sizeof(GraphPiece)));
+    }
+    printf("AFTER INIT TASK\n");
+
+    // Do one iteration outside of the timing.
+    int iteration = 0;
+    {
+      PullAppTask app_task(graph, task_is, local_args, iteration);
+      fm = runtime->execute_index_space(ctx, app_task);
+    }
+
  
-  // PageRank phase
-  int iteration = 0;
-  log_pr.print("Start PageRank computation...");
-  double ts_start = Realm::Clock::current_time_in_microseconds(); 
-  for (int i = 0; i < numIter; i++) {
-    iteration = i;
-    PullAppTask app_task(graph, task_is, local_args, iteration);
-    fm = runtime->execute_index_space(ctx, app_task);
+    // PageRank phase
+    TaskLauncher start (START_TIMER_TASK_ID, TaskArgument());
+    runtime->execute_task(ctx, start);
+
+    printf("BEFORE SELECT TUNABLE VALUE CALL\n");
+    Future f1 = runtime->select_tunable_value(ctx, 124, 0);
+    f1.get_untyped_pointer();
+    f1.wait();
+    printf("AFTER SELECT TUNABLE VALUE CALL\n");
+
+    log_pr.print("Start PageRank computation...");
+    double ts_start = Realm::Clock::current_time_in_microseconds(); 
+    for (int i = 1; i < numIter; i++) {
+      iteration = i;
+      PullAppTask app_task(graph, task_is, local_args, iteration);
+      fm = runtime->execute_index_space(ctx, app_task);
+    }
+    fm.wait_all_results();
+
+
+    TaskLauncher end (STOP_TIMER_TASK_ID, TaskArgument());
+    runtime->execute_task(ctx, end);
+
+    Future f2 = runtime->select_tunable_value(ctx, 123, 0);
+    f2.get_untyped_pointer();
+    f2.wait();
+
+    double ts_end = Realm::Clock::current_time_in_microseconds();
+    double sim_time = 1e-6 * (ts_end - ts_start);
+    log_pr.print("Finish PageRank computation...");
+    printf("ELAPSED TIME = %7.7f s\n", sim_time);
   }
-  fm.wait_all_results();
-  double ts_end = Realm::Clock::current_time_in_microseconds();
-  double sim_time = 1e-6 * (ts_end - ts_start);
-  log_pr.print("Finish PageRank computation...");
-  printf("ELAPSED TIME = %7.7f s\n", sim_time);
 }
 
 void parse_input_args(char **argv, int argc,

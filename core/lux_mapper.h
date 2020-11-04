@@ -18,18 +18,19 @@
 
 #include "legion.h"
 #include "default_mapper.h"
+#include "../../beam_mapper.h"
 
 using namespace Legion;
 using namespace Legion::Mapping;
 
-class LuxMapper : public DefaultMapper {
+class LuxMapper : public BeamMapper {
 public:
-  LuxMapper(Machine machine, Runtime *runtime, Processor local);
-  ~LuxMapper();
-public:
-  virtual void select_task_options(const MapperContext ctx,
-                                   const Task& task,
-                                   TaskOptions& output);
+  LuxMapper(Machine machine, MapperRuntime *runtime, Processor local,
+                const char *mapper_name);
+// public:
+  // virtual void select_task_options(const MapperContext ctx,
+  //                                  const Task& task,
+  //                                  TaskOptions& output);
   virtual void slice_task(const MapperContext ctx,
                           const Task& task,
                           const SliceTaskInput& input,
@@ -41,7 +42,7 @@ public:
   //                      const Task& task,
   //                      const MapTaskInput& input,
   //                      MapTaskOutput& output);
-protected:
+// protected:
   unsigned int numNodes;
   std::vector<TaskSlice> gpuSlices, cpuSlices;
   std::map<unsigned, std::vector<Processor>* > allGPUs, allCPUs;

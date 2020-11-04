@@ -455,7 +455,7 @@ PullAppTask::PullAppTask(const Graph &graph,
   {
     RegionRequirement rr(graph.dist_lr[iter%2], 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.dist_lr[iter%2],
-                         MAP_TO_ZC_MEMORY);
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -463,7 +463,7 @@ PullAppTask::PullAppTask(const Graph &graph,
   {
     RegionRequirement rr(graph.dist_lp[(iter+1)%2], 0/*identity*/,
                          WRITE_ONLY, EXCLUSIVE, graph.dist_lr[(iter+1)%2],
-                         MAP_TO_ZC_MEMORY);
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -472,11 +472,12 @@ PullAppTask::PullAppTask(const Graph &graph,
 static void update_mappers(Machine machine, Runtime *rt,
                            const std::set<Processor> &local_procs)
 {
-  for (std::set<Processor>::const_iterator it = local_procs.begin();
-        it != local_procs.end(); it++)
-  {
-    rt->replace_default_mapper(new LuxMapper(machine, rt, *it), *it);
-  }
+  rt->replace_default_mapper(new LuxMapper(machine, rt->get_mapper_runtime(), *local_procs.begin(), "lux_mapper"), Processor::NO_PROC);
+  // for (std::set<Processor>::const_iterator it = local_procs.begin();
+  //       it != local_procs.end(); it++)
+  // {
+  //   rt->replace_default_mapper(new LuxMapper(machine, rt, *it), *it);
+  // }
 }
 
 int main(int argc, char **argv)
@@ -514,6 +515,20 @@ int main(int argc, char **argv)
     registrar.set_leaf();
     Runtime::preregister_task_variant<pull_app_task_impl>(
         registrar, "app_task (pull)");
+  }
+  {
+    TaskVariantRegistrar registrar(START_TIMER_TASK_ID, "start_timer");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<start_timer_task_impl>(
+        registrar, "start_timer");
+  }
+  {
+    TaskVariantRegistrar registrar(STOP_TIMER_TASK_ID, "stop_timer");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<stop_timer_task_impl>(
+        registrar, "stop_timer");
   }
   Runtime::add_registration_callback(update_mappers);
 
